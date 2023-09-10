@@ -43,12 +43,40 @@ where
     deserializer.end().map(move |_| t)
 }
 
+/// Same as `from_bytes` but use `limit` as max container depth instead of MAX_CONTAINER_DEPTH`
+/// Note that `limit` has to be lower than MAX_CONTAINER_DEPTH
+pub fn from_bytes_with_limit<'a, T>(bytes: &'a [u8], limit: usize) -> Result<T>
+where
+    T: Deserialize<'a>,
+{
+    if limit > crate::MAX_CONTAINER_DEPTH {
+        return Err(Error::NotSupported("limit exceeds the max allowed depth"));
+    }
+    let mut deserializer = Deserializer::new(bytes, limit);
+    let t = T::deserialize(&mut deserializer)?;
+    deserializer.end().map(move |_| t)
+}
+
 /// Perform a stateful deserialization from a `&[u8]` using the provided `seed`.
 pub fn from_bytes_seed<'a, T>(seed: T, bytes: &'a [u8]) -> Result<T::Value>
 where
     T: DeserializeSeed<'a>,
 {
     let mut deserializer = Deserializer::new(bytes, crate::MAX_CONTAINER_DEPTH);
+    let t = seed.deserialize(&mut deserializer)?;
+    deserializer.end().map(move |_| t)
+}
+
+/// Same as `from_bytes_seed` but use `limit` as max container depth instead of MAX_CONTAINER_DEPTH`
+/// Note that `limit` has to be lower than MAX_CONTAINER_DEPTH
+pub fn from_bytes_seed_with_limit<'a, T>(seed: T, bytes: &'a [u8], limit: usize) -> Result<T::Value>
+where
+    T: DeserializeSeed<'a>,
+{
+    if limit > crate::MAX_CONTAINER_DEPTH {
+        return Err(Error::NotSupported("limit exceeds the max allowed depth"));
+    }
+    let mut deserializer = Deserializer::new(bytes, limit);
     let t = seed.deserialize(&mut deserializer)?;
     deserializer.end().map(move |_| t)
 }
@@ -541,27 +569,26 @@ where
     {
         self.enter_named_container(name)?;
         let r = visitor.visit_newtype_struct(&mut *self);
-        self.leave_named_container();
         r
     }
-    #[allow(clippy::needless_borrow)]
-    fn deserialize_seq<V>(mut self, visitor: V) -> Result<V::Value>
+
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         let len = self.parse_length()?;
-        visitor.visit_seq(SeqDeserializer::new(&mut self, len))
+        visitor.visit_seq(SeqDeserializer::new(self, len))
     }
-    #[allow(clippy::needless_borrow)]
-    fn deserialize_tuple<V>(mut self, len: usize, visitor: V) -> Result<V::Value>
+
+    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        visitor.visit_seq(SeqDeserializer::new(&mut self, len))
+        visitor.visit_seq(SeqDeserializer::new(self, len))
     }
     #[allow(clippy::needless_borrow)]
     fn deserialize_tuple_struct<V>(
-        mut self,
+        self,
         name: &'static str,
         len: usize,
         visitor: V,
@@ -570,21 +597,21 @@ where
         V: Visitor<'de>,
     {
         self.enter_named_container(name)?;
-        let r = visitor.visit_seq(SeqDeserializer::new(&mut self, len));
+        let r = visitor.visit_seq(SeqDeserializer::new(self, len));
         self.leave_named_container();
         r
     }
-    #[allow(clippy::needless_borrow)]
-    fn deserialize_map<V>(mut self, visitor: V) -> Result<V::Value>
+
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
         let len = self.parse_length()?;
-        visitor.visit_map(MapDeserializer::new(&mut self, len))
+        visitor.visit_map(MapDeserializer::new(self, len))
     }
     #[allow(clippy::needless_borrow)]
     fn deserialize_struct<V>(
-        mut self,
+        self,
         name: &'static str,
         fields: &'static [&'static str],
         visitor: V,
@@ -593,7 +620,7 @@ where
         V: Visitor<'de>,
     {
         self.enter_named_container(name)?;
-        let r = visitor.visit_seq(SeqDeserializer::new(&mut self, fields.len()));
+        let r = visitor.visit_seq(SeqDeserializer::new(self, fields.len()));
         self.leave_named_container();
         r
     }
